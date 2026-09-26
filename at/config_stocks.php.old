@@ -1,0 +1,457 @@
+<?php
+
+use AC\core\system\helpers\NumberHelper;
+use AC\core\system\helpers\TimeHelper;
+
+
+use AC\core\engines\Engines;
+use AC\core\modules\areas\models\AreasModel;
+
+class stocks_admin
+{
+  /**
+   * @var Engines
+   */
+  private        $e;
+  private string $pageKey = 'config_stocks';
+
+
+  function start()
+  {
+    $this->e = new Engines();
+
+    switch (Service::request()->_('action')) {
+      case 'insert':
+        return $this->insert();
+        break;
+      case 'edit':
+        return $this->edit();
+        break;
+      case 'editTime':
+        return $this->editTimeForm();
+        break;
+      case 'changeTime':
+        return $this->changeTime();
+        break;
+      case 'change':
+        return $this->change();
+        break;
+      case 'remove':
+        return $this->remove();
+        break;
+      default:
+        return $this->getList();
+    }
+  }
+
+  //удалить новость
+  function remove()
+  {
+    $this->e->stocks->removeStock((int)$_GET['stock_id']);
+
+    return Service::redirect()->redirect(site_url(Service::structure()->getPageHrefByKey($this->getPageKey())))->send();
+  }
+
+  //добавить новость
+  function insert()
+  {
+    $this->e->stocks->insertStock(
+      (int)$_POST['sort'],
+      $_POST['code'],
+      $_POST['title'],
+      NumberHelper::float($_POST['rate']),
+      (isset($_POST['for_all']) ? 1 : 0),
+      Service::request()->_('type_sport', null),
+      (int)isset($_POST['only_once']),
+      (int)Service::request()->_('dimension', 1),
+      (int)Service::request()->_post('group')
+    );
+
+    return Service::redirect()->redirect(site_url(Service::structure()->getPageHrefByKey($this->getPageKey())))->send();
+  }
+
+  //изменить новость
+  function change()
+  {
+    $this->e->stocks->changeStock(
+      (int)$_GET['stock_id'],
+      (int)$_POST['sort'],
+      $_POST['code'],
+      $_POST['title'],
+      NumberHelper::float($_POST['rate']),
+      (isset($_POST['for_all']) ? 1 : 0),
+      Service::request()->_('type_sport', null),
+      (int)isset($_POST['only_once']),
+      (int)Service::request()->_('dimension', 1),
+      (int)Service::request()->_post('group')
+    );
+
+    return Service::redirect()->redirect(site_url(Service::structure()->getPageHrefByKey($this->getPageKey())))->send();
+  }
+
+  //форма редактирования новости
+  function edit()
+  {
+    //если новости нет - показываем список
+    if ($this->e->stocks->getStock((int)$_GET['stock_id'], $item)) {
+      //форма редактирования
+      $out = $this->getFields(1, $item);
+
+      return array($out, '<span class="back"><a href="config_stocks.php">' . lang('Back') . '</a></span>');
+    } else {
+      return Service::redirect()->redirect(site_url(Service::structure()->getPageHrefByKey($this->getPageKey())))->send();
+    }
+  }
+
+  function changeTime()
+  {
+    if (isset($_GET['stock_id'])) {
+      $this->e->stocks->changeStockDuration(
+        (int)$_GET['stock_id'],
+        (isset($_POST['active']) ? 1 : 0),
+        $_POST['start_year'] . '-' . $_POST['start_month'] . '-' . $_POST['start_day'],
+        $_POST['finish_year'] . '-' . $_POST['finish_month'] . '-' . $_POST['finish_day'],
+        (isset($_POST['time']) ? $_POST['time'] : false)
+      );
+    }
+
+    return Service::redirect()->redirect(site_url(Service::structure()->getPageHrefByKey($this->getPageKey())))->send();
+  }
+
+  function editTimeForm()
+  {
+    if ($this->e->stocks->getStock((int)$_GET['stock_id'], $item)) {
+      $interval = 0;
+      $prev     = 0;
+      $finish   = 0;
+      if ($this->e->areas->getAllAreasData($areas_data)) {
+        foreach ($areas_data as $area) {
+          if (!empty($item['type_sport']) && $item['type_sport'] != $area['type_id'] . '_' . $area['sport_id']) {
+            continue;
+          }
+          $interval = ($area['period'] > $interval ? $area['period'] : $interval);
+          $prev     = ($area['start'] < $prev || !$prev ? $area['start'] : $prev);
+          $finish   = ($area['finish'] > $finish || !$finish ? $area['finish'] : $finish);
+        }
+        $prev   = substr($prev, 0, 5);
+        $finish = substr($finish, 0, 5);
+
+        $out           = '<form method="post" action="config_stocks.php?action=changeTime&stock_id=' . $item['stock_id'] . '">' . "\n";
+        $out           .= '<table border="0" cellspacing="1" cellpadding="3" align="center" class="main wide">' . "\n";
+        $out           .= "<tr><th colspan=\"2\">" . lang('Validity in time', 'config_stock') . " - " . $item['title'] . "</th></tr>\n";
+        $out           .= '<tr><td class="dark">' . lang('Active') . ':</td><td class="dark"><input type="checkbox" class="input" name="active" value="1" ' . ((isset($item['duration']) && $item['duration'] == 1)
+            ? 'checked' : '') . '/></td></tr>' . "\n";
+        $out           .= '<tr><td class="light">' . lang('From') . ':</td><td class="light">' . "\n";
+        $out           .= '<table cellspacing="0" cellpadding="0" border="0"><tr>' . "\n";
+        $unix_cur_date = (isset($item['duration_start'])
+          ? strtotime($item['duration_start'])
+          : strtotime(
+            date('Y-m-d')
+          ));
+
+        //годы
+        $select_years = '<select name="start_year">' . "\n";
+        for ($i = date('Y') - 1; $i <= date('Y') + 3; $i++) {
+          $select_years .= '<option value="' . $i . '"' . ($i == date(
+              'Y',
+              $unix_cur_date
+            ) ? ' selected' : '') . '>' . $i . '</option>' . "\n";
+        }
+        $select_years .= '</select>' . "\n";
+        $out          .= '			<td>' . $select_years . '</td>';
+
+        //месяцы
+        $select_monthes = '<select name="start_month">' . "\n";
+        for ($i = 1; $i <= 12; $i++) {
+          $select_monthes .= '<option value="' . sprintf("%02d", $i) . '"' . ($i == date(
+              'm',
+              $unix_cur_date
+            ) ? ' selected' : '') . '>' . sprintf("%02d", $i) . '</option>' . "\n";
+        }
+        $select_monthes .= '</select>' . "\n";
+        $out            .= '			<td>' . $select_monthes . '</td>';
+
+        //дни
+        $select_days = '<select name="start_day">' . "\n";
+        for ($i = 1; $i <= 31; $i++) {
+          $select_days .= '<option value="' . sprintf("%02d", $i) . '"' . ($i == date(
+              'd',
+              $unix_cur_date
+            ) ? ' selected' : '') . '>' . sprintf("%02d", $i) . '</option>' . "\n";
+        }
+        $select_days .= '</select>' . "\n";
+        $out         .= '			<td>' . $select_days . '</td>';
+        $out         .= "	</tr></table>\n";
+        $out         .= '</td></tr>' . "\n";
+        $out         .= '<tr><td class="light">' . lang('Until') . ':</td><td class="light">' . "\n";
+        $out         .= '<table cellspacing="0" cellpadding="0" border="0"><tr>' . "\n";
+
+        $unix_cur_date = (isset($item['duration_finish'])
+          ? strtotime($item['duration_finish'])
+          : strtotime(
+            date('Y-m-d')
+          ));
+
+        //годы
+        $select_years = '<select name="finish_year">' . "\n";
+        for ($i = date('Y') - 1; $i <= date('Y') + 3; $i++) {
+          $select_years .= '<option value="' . $i . '"' . ($i == date(
+              'Y',
+              $unix_cur_date
+            ) ? ' selected' : '') . '>' . $i . '</option>' . "\n";
+        }
+        $select_years .= '</select>' . "\n";
+        $out          .= '			<td>' . $select_years . '</td>';
+
+        //месяцы
+        $select_monthes = '<select name="finish_month">' . "\n";
+        for ($i = 1; $i <= 12; $i++) {
+          $select_monthes .= '<option value="' . sprintf("%02d", $i) . '"' . ($i == date(
+              'm',
+              $unix_cur_date
+            ) ? ' selected' : '') . '>' . sprintf("%02d", $i) . '</option>' . "\n";
+        }
+        $select_monthes .= '</select>' . "\n";
+        $out            .= '			<td>' . $select_monthes . '</td>';
+
+        //дни
+        $select_days = '<select name="finish_day">' . "\n";
+        for ($i = 1; $i <= 31; $i++) {
+          $select_days .= '<option value="' . sprintf("%02d", $i) . '"' . ($i == date(
+              'd',
+              $unix_cur_date
+            ) ? ' selected' : '') . '>' . sprintf("%02d", $i) . '</option>' . "\n";
+        }
+        $select_days .= '</select>' . "\n";
+        $out         .= '			<td>' . $select_days . '</td>';
+        $out         .= "	</tr></table>\n";
+        $out         .= '</td></tr>' . "\n";
+        $out         .= '<tr><td class="light" colspan="2">' . "\n";
+        $out         .= '<table border="0" cellspacing="1" cellpadding="3" align="center" class="main wide">' . "\n";
+        $out         .= "<tr><th width='90px'>" . lang('Time in hours') . "</th>
+                          <th>" . lang('weekday_small_0') . "<br /><input type=\"checkbox\" value=\"1\" onchange=\"selectAllCheck(this, 'weekday_c_0')\"/></th>
+                          <th>" . lang('weekday_small_1') . "<br /><input type=\"checkbox\" value=\"1\" onchange=\"selectAllCheck(this, 'weekday_c_1')\"/></th>
+                          <th>" . lang('weekday_small_2') . "<br /><input type=\"checkbox\" value=\"1\" onchange=\"selectAllCheck(this, 'weekday_c_2')\"/></th>
+                          <th>" . lang('weekday_small_3') . "<br /><input type=\"checkbox\" value=\"1\" onchange=\"selectAllCheck(this, 'weekday_c_3')\"/></th>
+                          <th>" . lang('weekday_small_4') . "<br /><input type=\"checkbox\" value=\"1\" onchange=\"selectAllCheck(this, 'weekday_c_4')\"/></th>
+                          <th>" . lang('weekday_small_5') . "<br /><input type=\"checkbox\" value=\"1\" onchange=\"selectAllCheck(this, 'weekday_c_5')\"/></th>
+                          <th>" . lang('weekday_small_6') . "<br /><input type=\"checkbox\" value=\"1\" onchange=\"selectAllCheck(this, 'weekday_c_6')\"/></th></tr>\n";
+        $j           = 0;
+        do {
+          //проходимся по временным интервалам
+          $current = TimeHelper::addMinutes2MySQLTime($prev, $interval);
+
+          $class = $j % 2 == 0 ? 'light' : 'dark';
+          $out   .= "<tr><td class=\"" . $class . "\"><b>" . $prev . " - " . $current . "</b></td>";
+          //промежутки по дням недели
+          for ($i = 0; $i < 7; $i++) {
+            $out .= '<td class="' . $class . '" align="center"><input class="input weekday_c_' . $i . '" type="checkbox" name="time[' . $i . '][' . $prev . ']" value="' . $current . '" ' . (isset($item['time'][$i][$prev . ':00'])
+                ? 'checked' : '') . '></td>' . "\n";
+          }
+          $out  .= "</tr>\n";
+          $prev = $current;
+          $j++;
+        } while (strtotime($current) < strtotime(TimeHelper::convertTime24($finish)));
+
+        $out .= "</table><br />\n";
+        $out .= '</td></tr>' . "\n";
+        $out .= '<tr><th align="center" colspan="8"><input type=submit class="button" value="' . lang('button_update') . '">&nbsp;<input type="reset" class="button" value="' . lang('button_reset') . '"></th></tr>' . "\n";
+        $out .= "</table><br />\n";
+        $out .= "</form>\n";
+      }
+
+      return array($out, '<span class="back"><a href="config_stocks.php">' . lang('Back') . '</a></span>');
+    } else {
+      return Service::redirect()->redirect(site_url(Service::structure()->getPageHrefByKey($this->getPageKey())))->send();
+    }
+  }
+
+  //список настроек
+  function getList()
+  {
+    $sports = AreasModel::relevantSportsByType();
+    $groups = [];
+    getEngine('stocksGroups')->getData($groups);
+    $out    = '<table border="0" cellspacing="1" cellpadding="3" align="center" class="main wide">' . "\n";
+    $out    .= '<tr>
+                  <th>' . lang('Line', 'config_stock') . '</th>
+                  <th>' . lang('Letter code', 'config_stock') . '</th>
+                  <th>' . lang('Title') . '</th>
+                  <th>' . lang('Rate') . '</th>
+                  <th>' . lang('title_choice_type_sport', 'config_stock') . '</th>'
+                  .(count($groups) ? '<th>' . lang('Group', 'stocks_groups') . '</th>' : '')
+                  .'<th>' . lang('For all users', 'config_stock') . '</th>
+                  <th>' . lang('calculate_only_once', 'config_stock') . '</th>
+                  <th colspan="3">' . lang('Action') . '</th>
+                </tr>' . "\n";
+    if ($this->e->stocks->getStocks($stocks)) {
+      foreach ($stocks as $item) {
+        $out .= '<tr>' .
+          '<td class="dark" align="center">' . $item['sort'] . '</td>' .
+          '<td class="light">' . $item['code'] . '</td>' .
+          '<td class="dark">' . $item['title'] . '</td>' .
+          '<td class="light">' . number_format($item['rate'], 2, ',', '.') . ' ' . ($item['dimension'] == 1 ? CURR_VALUTE : '%') . '</td>';
+        $out .= '<td class="dark">' .
+          (isset($item['type_sport']) && !empty($item['type_sport']) ?
+            $sports[$item['type_sport']]->title
+            : lang('all_choice', 'config_stock')) . '</td>';
+        if(count($groups)) {
+          $out .= '<td class="dark">' .
+            ( !empty($item['group']) ?
+              ($groups[$item['group']]->active ? '<a href="' . Service::structure()->getPageHrefByKey('stocks_groups') . '/condition/id/' . $groups[$item['group']]->id . '" class="btnEdit">' .$groups[$item['group']]->title . '</a>' : '<span style="pointer-events: none; color: #6d6d6d;">' . $groups[$item['group']]->title . '</span>')
+              : '') . '</td>';
+        }
+        $out .= '<td class="light" style="text-align: center">' . ((isset($item['for_all']) && $item['for_all'] == 1) ? '<i class="fas fa-check"></i>'
+            : '') . '</td>';
+        $out .= '<td class="light" style="text-align: center">' . ((isset($item['only_once']) && $item['only_once'] == 1)
+            ? '<i class="fas fa-check"></i>'
+            : '') . '</td>';
+        $out .= '<td class="light"><a href="config_stocks.php?action=editTime&stock_id=' . $item['stock_id'] . '" class="btnEdit">' . lang('Validity in time',
+            'config_stock') . '</a></td>';
+        $out .= '<td class="light"><a href="config_stocks.php?action=edit&stock_id=' . $item['stock_id'] . '" class="btnEdit">' . lang('button_update') . '</a></td>';
+        $out .= '<td class="light"><a href="config_stocks.php?action=remove&stock_id=' . $item['stock_id'] . '" onclick="return ifConfirm ()" class="btnRemove">' . lang('button_remove') . '</a></td>';
+        $out .= '</tr>' . "\n";
+      }
+    }
+
+    $out .= "</table>\n";
+
+    return array($out, $this->getFields(0));
+  }
+
+  function getFields($mode, $row = array())
+  {
+    //html
+
+    $out = '<form action="config_stocks.php?action=' . ($mode == 0 ? 'insert' : 'change&stock_id=' . $row['stock_id']) . '" method="post">' . "\n";
+
+    $sports = AreasModel::relevantSportsByType();
+    $groups = [];
+    getEngine('stocksGroups')->getData($groups);
+    ob_start();
+    ?>
+    <table border="0" cellspacing="1" cellpadding="3" align="center" class="main wide">
+      <tr>
+        <th colspan="2"><?= ($mode == 0 ? lang('title_create') : lang('title_update')) ?></th>
+      </tr>
+      <tr>
+        <td class="dark"><?= lang('Line', 'config_stock') ?>:</td>
+        <td class="dark"><input type="text" name="sort" class="input wide"
+                                value="<?= (isset($row['sort']) ? $row['sort'] : '') ?>"/></td>
+      </tr>
+      <tr>
+        <td class="light"><?= lang('Letter code', 'config_stock') ?>:</td>
+        <td class="light"><input type="text" name="code" class="input wide" maxlength="2"
+                                 value="<?= (isset($row['code']) ? str_replace('"', '&amp;', $row['code']) : '') ?>"/>
+        </td>
+      </tr>
+      <tr>
+        <td class="dark"><?= lang('Title') ?>:</td>
+        <td class="dark"><input type="text" name="title" class="input wide"
+                                value="<?= (isset($row['title']) ? str_replace('"', '&amp;', $row['title']) : '') ?>"/>
+        </td>
+      </tr>
+      <tr>
+        <td class="dark"><?= lang('Type') ?>:</td>
+        <td class="dark">
+          <input type="radio" name="dimension" value="1" <?= (isset($row['dimension']) ? ($row['dimension'] == 1 ? 'checked' : '')
+            : 'checked') ?> /> <?= CURR_VALUTE ?>
+          <input type="radio" name="dimension" value="2" <?= ((isset($row['dimension']) && $row['dimension'] == 2) ? 'checked' : '') ?> /> %
+        </td>
+      </tr>
+      <tr>
+        <td class="light"><?= lang('Rate') ?>, <?= CURR_VALUTE ?>:</td>
+        <td class="light"><input type="text" name="rate" class="input wide"
+                                 value="<?= (isset($row['rate']) ? number_format($row['rate'], 2, ',', '.') : '') ?>"/>
+        </td>
+      </tr>
+      <tr>
+        <td class="dark" colspan="2" style="text-align:right;padding: 7px">
+          <?= lang('Set a negative value if the options are used as a discount.', 'config_stock') ?>
+        </td>
+      </tr>
+      <tr>
+        <td class="light"><?= lang('title_choice_type_sport', 'config_stock') ?>:</td>
+        <td class="light">
+          <select name="type_sport" class="input wide">
+            <!--            <option value="">--><?//= lang('all_choice', 'config_stock')
+            ?><!--</option>-->
+            <?php
+            foreach ($sports as $key => $sport) { ?>
+              <option
+                value="<?= $key ?>" <?= (isset($row['type_sport']) && $row['type_sport'] == $key ? 'selected' : '') ?>><?= $sport->title ?></option>
+              <?php
+            } ?>
+          </select>
+        </td>
+      </tr>
+      <?php if(count($groups)):?>
+        <tr>
+          <td class="light"><?= lang('Group', 'stocks_groups') ?>:</td>
+          <td class="light">
+            <select name="group" class="input wide">
+              <option value="" ><?= lang('no') ?></option>
+              <?php
+              foreach ($groups as $group) { ?>
+                <option
+                  value="<?= $group->id ?>" <?= (isset($row['group']) && $row['group']->id == $group->id ? 'selected="true"' : '') ?> <?= (!$group->active ? 'disabled="disabled"' : '') ?>><?= $group->title ?></option>
+                <?php
+              } ?>
+            </select>
+          </td>
+        </tr>
+      <?php endif;?>
+      <tr>
+        <td class="dark"><?= lang('For all users', 'config_stock') ?>:</td>
+        <td class="dark"><input type="checkbox" name="for_all" class="input"
+                                value="1" <?= ((isset($row['for_all']) && $row['for_all'] == 1) ? 'checked' : '') ?> />
+        </td>
+      </tr>
+      <tr>
+        <td class="dark"><?= lang('calculate_only_once', 'config_stock') ?>:</td>
+        <td class="dark"><input type="checkbox" name="only_once" class="input"
+                                value="1" <?= ((isset($row['only_once']) && $row['only_once'] == 1) ? 'checked' : '') ?> />
+        </td>
+      </tr>
+      <tr>
+        <th align="center" colspan="2">
+          <input type="submit" value="<?= ($mode == 0 ? lang('button_create') : lang('button_update')) ?>" class="button">
+          &nbsp;
+          <input type="reset" value="<?= lang('button_reset') ?>" class="button">
+        </th>
+      </tr>
+    </table>
+    <?
+    $out .= ob_get_contents();
+    ob_end_clean();
+
+    return $out;
+  }
+
+//  public function getContentMenu()
+//  {
+//    $menu['site']  = [
+//      'href'   => Service::structure()->getPageHrefByKey($this->getPageKey()),
+//      'title'  => lang('config_stocks_title', 'structure'),
+//      'active' => Service::request()->_get('mode') != 'groups',
+//    ];
+//    $menu['touch'] = [
+//      'href'   => Service::structure()->getPageHrefByKey($this->getPageKey()) . '?mode=groups',
+//      'title'  => lang('stocks_groups', 'structure'),
+//      'active' => Service::request()->_get('mode') == 'groups',
+//    ];
+//
+//    return [$menu];
+//  }
+
+//  public function getPageKey(): string
+//  {
+//    return $this->pageKey;
+//  }
+
+}
+
+$a                     = new stocks_admin;
+$_page['content']      = $a->start();
+//$_page['content_menu'] = $a->getContentMenu();
+$_page['key']          = $a->getPageKey();

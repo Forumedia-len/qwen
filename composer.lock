@@ -1,0 +1,46 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "6d6a586663ee79adc252b186f36d7f47",
+    "packages": [],
+    "packages-dev": [
+        {
+            "name": "active-court/base-ac-dev",
+            "version": "dev-master",
+            "source": {
+                "type": "git",
+                "url": "https://git.forumedia.eu/ActiveCourt/ac_tests.git",
+                "reference": "a0d50983fd5316aaeca34e51e60131c63bfd6663"
+            },
+            "require": {
+                "ext-pdo": "*"
+            },
+            "require-dev": {
+                "codeception/codeception": "^5.1",
+                "codeception/module-asserts": "^3.0"
+            },
+            "default-branch": true,
+            "type": "library",
+            "license": [
+                "proprietary"
+            ],
+            "description": "Dev dependencies for base-ac",
+            "time": "2026-08-14T16:33:43+00:00"
+        }
+    ],
+    "aliases": [],
+    "minimum-stability": "stable",
+    "stability-flags": {
+        "active-court/base-ac-dev": 20
+    },
+    "prefer-stable": false,
+    "prefer-lowest": false,
+    "platform": {
+        "php": "~8.2.0"
+    },
+    "platform-dev": {},
+    "plugin-api-version": "2.9.0"
+}

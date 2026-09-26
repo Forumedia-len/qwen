@@ -1,0 +1,1 @@
+<? echo exec('mysqldump --user="root" --password="Rayran" --host="localhost" at_berenbostel > tennisanlage-berenbostel.de_2022-02-10_01-13-40.sql') ?>

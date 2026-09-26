@@ -1,0 +1,1 @@
+<i class="fa fa-ban fa-rotate-90" aria-hidden="true"  style="color: red"></i>

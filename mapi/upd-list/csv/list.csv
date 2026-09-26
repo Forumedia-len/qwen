@@ -1,0 +1,4 @@
+site,base,prefix,ftp_host,ftp_user,ftp_pass,ftp_path,bd_user,bd_pass,bd_host,protocol
+lilnail.ru,at_groenau,at_groenau_,lilnail.vhost35008.cpsite.ru,medeya@lilnail.ru,NDL5OR^9adK2,,,,,http
+tennis-buchung.de,at_tennis_buchung,at_tennis_buchung2_,tennis-buchung.de,web2,f3f?or$s31,/html/tennis-buchung.de,,,,http
+site4,at_test_upd4,prefix,ftp4,ftp_user4,ftp_pass4,ftp_path4,,,,

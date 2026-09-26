@@ -1,0 +1,263 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Проверяет структуру и локальные ссылки проектной документации.
+ */
+final class DocumentationChecker
+{
+  /** @var list<string> */
+  private array $errors = [];
+
+  private string $docsRoot;
+
+  public function __construct(private readonly string $repoRoot)
+  {
+    $this->docsRoot = $repoRoot . DIRECTORY_SEPARATOR . '.docs';
+  }
+
+  /**
+   * Запускает все проверки и возвращает exit code.
+   */
+  public function run(array $arguments): int
+  {
+    if (count($arguments) === 1 && in_array($arguments[0], ['h', 'help', '-h', '--help'], true)) {
+      fwrite(STDOUT, 'Usage: php bin/check-documentation' . PHP_EOL);
+      fwrite(STDOUT, 'Checks documentation links, indexes, paths and PHP requirements.' . PHP_EOL);
+
+      return 0;
+    }
+    if ($arguments !== []) {
+      $this->writeError('Unknown argument: ' . $arguments[0]);
+      $this->writeError('Use h, help, -h or --help for usage.');
+
+      return 2;
+    }
+
+    if (!is_dir($this->docsRoot)) {
+      $this->writeError('Documentation directory .docs was not found.');
+
+      return 1;
+    }
+
+    $this->checkRequiredIndexes();
+    $this->checkObsoleteDirectories();
+
+    $markdownFiles = $this->collectMarkdownFiles();
+    $this->checkLocalLinks($markdownFiles);
+    $this->checkPhpRequirements($markdownFiles);
+
+    if ($this->errors !== []) {
+      $this->writeError(sprintf(
+        'Documentation check failed with %d error(s):',
+        count($this->errors),
+      ));
+      foreach ($this->errors as $error) {
+        $this->writeError('- ' . $error);
+      }
+
+      return 1;
+    }
+
+    fwrite(
+      STDOUT,
+      sprintf('Documentation check passed for %d Markdown file(s).', count($markdownFiles)) . PHP_EOL,
+    );
+
+    return 0;
+  }
+
+  private function checkRequiredIndexes(): void
+  {
+    $requiredIndexes = [
+      '.README.md',
+      '.docs/README.md',
+      '.docs/modules/README.md',
+      '.docs/tasks/README.md',
+      '.docs/archive/README.md',
+      '.docs/archive/tasks/README.md',
+      '.docs/archive/reports/README.md',
+    ];
+
+    foreach ($requiredIndexes as $relativePath) {
+      if (!is_file($this->repoPath($relativePath))) {
+        $this->errors[] = 'Missing required index: ' . $relativePath;
+      }
+    }
+  }
+
+  private function checkObsoleteDirectories(): void
+  {
+    $obsoleteDirectories = [
+      '.docs/report_cursor',
+      '.docs/reports',
+      '.docs/promt',
+    ];
+
+    foreach ($obsoleteDirectories as $relativePath) {
+      $directory = $this->repoPath($relativePath);
+      if (!is_dir($directory)) {
+        continue;
+      }
+
+      $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS),
+      );
+      foreach ($iterator as $item) {
+        if ($item->isFile()) {
+          $this->errors[] = 'Obsolete documentation directory contains files: ' . $relativePath;
+          break;
+        }
+      }
+    }
+  }
+
+  /**
+   * @return list<string>
+   */
+  private function collectMarkdownFiles(): array
+  {
+    $files = [$this->repoPath('.README.md')];
+    $iterator = new RecursiveIteratorIterator(
+      new RecursiveDirectoryIterator($this->docsRoot, FilesystemIterator::SKIP_DOTS),
+    );
+
+    foreach ($iterator as $item) {
+      if ($item->isFile() && strtolower($item->getExtension()) === 'md') {
+        $files[] = $item->getPathname();
+      }
+    }
+
+    sort($files);
+
+    return $files;
+  }
+
+  /**
+   * @param list<string> $markdownFiles
+   */
+  private function checkLocalLinks(array $markdownFiles): void
+  {
+    foreach ($markdownFiles as $file) {
+      $lines = file($file, FILE_IGNORE_NEW_LINES);
+      if ($lines === false) {
+        $this->errors[] = $this->displayPath($file) . ': unable to read file';
+        continue;
+      }
+
+      $insideFence = false;
+      foreach ($lines as $lineIndex => $line) {
+        if (preg_match('/^\s*```/', $line) === 1) {
+          $insideFence = !$insideFence;
+          continue;
+        }
+        if ($insideFence) {
+          continue;
+        }
+
+        preg_match_all(
+          '~!?\[[^\]]*\]\((?<target>[^)]+)\)~u',
+          $line,
+          $matches,
+        );
+        foreach ($matches['target'] as $target) {
+          $this->checkLocalLink($file, $lineIndex + 1, trim($target));
+        }
+      }
+    }
+  }
+
+  private function checkLocalLink(string $file, int $lineNumber, string $target): void
+  {
+    if (str_starts_with($target, '<') && str_ends_with($target, '>')) {
+      $target = substr($target, 1, -1);
+    }
+
+    if (
+      preg_match('~^(?:[a-z][a-z0-9+.-]*:|#)~i', $target) === 1
+      || preg_match('/[{}<>]/', $target) === 1
+    ) {
+      return;
+    }
+
+    $target = preg_split('~\s+["\']~', $target, 2)[0] ?? $target;
+    $pathPart = explode('#', $target, 2)[0];
+    if (trim($pathPart) === '') {
+      return;
+    }
+
+    $pathPart = rawurldecode($pathPart);
+    $resolvedPath = str_starts_with($pathPart, '/')
+      ? $this->repoPath(ltrim($pathPart, '/'))
+      : dirname($file) . DIRECTORY_SEPARATOR . $pathPart;
+
+    if (!file_exists($resolvedPath)) {
+      $this->errors[] = sprintf(
+        "%s:%d: missing local link target '%s'",
+        $this->displayPath($file),
+        $lineNumber,
+        $target,
+      );
+    }
+  }
+
+  /**
+   * @param list<string> $markdownFiles
+   */
+  private function checkPhpRequirements(array $markdownFiles): void
+  {
+    $archiveRoot = $this->docsRoot . DIRECTORY_SEPARATOR . 'archive' . DIRECTORY_SEPARATOR;
+    $stalePhpPatterns = [
+      '~\bPHP\s*8\.3\+~i',
+      '~\bPHP\s*8\.0\s*(?:\+|или\s+выше)~iu',
+      '~\bPHP\s*7\.[0-9]\s*(?:\+|или\s+выше)~iu',
+      '~\bphp(?:7\.[0-9]|8\.[013-9])-fpm\b~i',
+    ];
+
+    foreach ($markdownFiles as $file) {
+      if (str_starts_with($file, $archiveRoot)) {
+        continue;
+      }
+
+      $content = file_get_contents($file);
+      if ($content === false) {
+        $this->errors[] = $this->displayPath($file) . ': unable to read file';
+        continue;
+      }
+
+      foreach ($stalePhpPatterns as $pattern) {
+        if (preg_match($pattern, $content) === 1) {
+          $this->errors[] = $this->displayPath($file)
+            . ': contains a stale PHP requirement; server runtime is PHP 8.2';
+          break;
+        }
+      }
+    }
+  }
+
+  private function repoPath(string $relativePath): string
+  {
+    return $this->repoRoot
+      . DIRECTORY_SEPARATOR
+      . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $relativePath);
+  }
+
+  private function displayPath(string $path): string
+  {
+    $prefix = $this->repoRoot . DIRECTORY_SEPARATOR;
+
+    return str_starts_with($path, $prefix)
+      ? str_replace(DIRECTORY_SEPARATOR, '/', substr($path, strlen($prefix)))
+      : $path;
+  }
+
+  private function writeError(string $message): void
+  {
+    fwrite(STDERR, $message . PHP_EOL);
+  }
+}
+
+$repoRoot = dirname(__DIR__);
+exit((new DocumentationChecker($repoRoot))->run(array_values(array_slice($argv, 1))));

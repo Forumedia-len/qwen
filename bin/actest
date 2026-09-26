@@ -1,0 +1,188 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Находит локальный или установленный лаунчер тестов Active Court.
+ */
+final class ActestBootstrap
+{
+  public function __construct(private readonly string $appRoot)
+  {
+  }
+
+  /**
+   * Запускает выбранный лаунчер и возвращает его exit code.
+   *
+   * @param list<string> $arguments
+   */
+  public function run(array $arguments): int
+  {
+    if (isset($arguments[0]) && in_array($arguments[0], ['h', 'help'], true)) {
+      $arguments[0] = '--help';
+    }
+
+    $options = $this->readLocatorOptions($arguments);
+    $testsRoot = $this->resolveTestsRoot($options['testsRoot'], $options['testsSource']);
+    $runnerPath = $testsRoot . DIRECTORY_SEPARATOR . 'bin' . DIRECTORY_SEPARATOR . 'actest';
+    $command = [PHP_BINARY, $runnerPath, ...$arguments];
+    $pipes = [];
+    $process = proc_open(
+      $command,
+      [STDIN, STDOUT, STDERR],
+      $pipes,
+      $this->appRoot,
+      null,
+      ['bypass_shell' => true],
+    );
+    if (!is_resource($process)) {
+      throw new RuntimeException('Не удалось запустить ' . $runnerPath);
+    }
+
+    return proc_close($process);
+  }
+
+  /**
+   * @param list<string> $arguments
+   * @return array{testsRoot: ?string, testsSource: string}
+   */
+  private function readLocatorOptions(array $arguments): array
+  {
+    $testsRoot = null;
+    $testsSource = 'auto';
+
+    for ($index = 0, $count = count($arguments); $index < $count; $index++) {
+      $argument = $arguments[$index];
+      if ($argument === '--tests-root') {
+        $testsRoot = $arguments[++$index] ?? throw new InvalidArgumentException(
+          'После --tests-root необходимо указать значение.',
+        );
+      } elseif (str_starts_with($argument, '--tests-root=')) {
+        $testsRoot = substr($argument, strlen('--tests-root='));
+      } elseif ($argument === '--tests-source') {
+        $testsSource = $arguments[++$index] ?? throw new InvalidArgumentException(
+          'После --tests-source необходимо указать значение.',
+        );
+      } elseif (str_starts_with($argument, '--tests-source=')) {
+        $testsSource = substr($argument, strlen('--tests-source='));
+      }
+    }
+
+    if (!in_array($testsSource, ['auto', 'local', 'package'], true)) {
+      throw new InvalidArgumentException('Допустимые значения --tests-source: auto, local, package.');
+    }
+    if ($testsSource === 'package' && $testsRoot !== null) {
+      throw new InvalidArgumentException('--tests-root нельзя использовать вместе с --tests-source=package.');
+    }
+
+    return ['testsRoot' => $testsRoot, 'testsSource' => $testsSource];
+  }
+
+  private function resolveTestsRoot(?string $argumentRoot, string $testsSource): string
+  {
+    $packageRoot = $this->appRoot
+      . DIRECTORY_SEPARATOR . 'vendor'
+      . DIRECTORY_SEPARATOR . 'active-court'
+      . DIRECTORY_SEPARATOR . 'base-ac-dev';
+    if ($testsSource === 'package') {
+      return $this->validatedTestsRoot($packageRoot, 'Composer package');
+    }
+    if ($argumentRoot !== null) {
+      return $this->validatedTestsRoot($this->resolvePath($argumentRoot), '--tests-root');
+    }
+
+    $localRoot = $this->readLocalTestsRoot();
+    if ($localRoot !== null) {
+      return $this->validatedTestsRoot($this->resolvePath($localRoot), '.actest.loc.json');
+    }
+
+    $environmentRoot = getenv('AC_TESTS_ROOT');
+    if (is_string($environmentRoot) && trim($environmentRoot) !== '') {
+      return $this->validatedTestsRoot($this->resolvePath($environmentRoot), 'AC_TESTS_ROOT');
+    }
+
+    foreach (
+      [
+        $this->appRoot . DIRECTORY_SEPARATOR . 'tests',
+        dirname($this->appRoot) . DIRECTORY_SEPARATOR . 'tests',
+      ] as $candidate
+    ) {
+      $realPath = realpath($candidate);
+      if ($realPath !== false && $this->containsRunner($realPath)) {
+        return $realPath;
+      }
+    }
+
+    if ($testsSource === 'local') {
+      throw new RuntimeException('Локальный репозиторий тестов не найден. Настройте .actest.loc.json или --tests-root.');
+    }
+
+    return $this->validatedTestsRoot($packageRoot, 'Composer package');
+  }
+
+  private function readLocalTestsRoot(): ?string
+  {
+    $configPath = $this->appRoot . DIRECTORY_SEPARATOR . '.actest.loc.json';
+    if (!is_file($configPath)) {
+      return null;
+    }
+
+    $contents = file_get_contents($configPath);
+    if ($contents === false) {
+      throw new RuntimeException('Не удалось прочитать ' . $configPath);
+    }
+
+    try {
+      $config = json_decode($contents, true, 32, JSON_THROW_ON_ERROR);
+    } catch (JsonException $exception) {
+      throw new RuntimeException('Некорректный JSON в ' . $configPath, previous: $exception);
+    }
+    if (!is_array($config) || !isset($config['testsRoot']) || !is_string($config['testsRoot'])) {
+      throw new RuntimeException($configPath . ' должен содержать строковое поле testsRoot.');
+    }
+
+    return $config['testsRoot'];
+  }
+
+  private function resolvePath(string $path): string
+  {
+    $candidate = $this->isAbsolutePath($path)
+      ? $path
+      : $this->appRoot . DIRECTORY_SEPARATOR . $path;
+    $realPath = realpath($candidate);
+    if ($realPath === false) {
+      throw new RuntimeException('Каталог тестов не существует: ' . $candidate);
+    }
+
+    return $realPath;
+  }
+
+  private function isAbsolutePath(string $path): bool
+  {
+    return preg_match('~\A(?:[a-zA-Z]:[\\\\/]|[\\\\/]{1,2})~', $path) === 1;
+  }
+
+  private function validatedTestsRoot(string $path, string $source): string
+  {
+    $realPath = realpath($path);
+    if ($realPath === false || !$this->containsRunner($realPath)) {
+      throw new RuntimeException('В источнике ' . $source . ' не найден bin/actest: ' . $path);
+    }
+
+    return $realPath;
+  }
+
+  private function containsRunner(string $testsRoot): bool
+  {
+    return is_file($testsRoot . DIRECTORY_SEPARATOR . 'bin' . DIRECTORY_SEPARATOR . 'actest');
+  }
+}
+
+try {
+  $command = new ActestBootstrap(dirname(__DIR__));
+  exit($command->run(array_values(array_slice($argv, 1))));
+} catch (Throwable $exception) {
+  fwrite(STDERR, 'actest bootstrap: ' . $exception->getMessage() . PHP_EOL);
+  exit(1);
+}

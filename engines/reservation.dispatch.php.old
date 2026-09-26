@@ -1,0 +1,238 @@
+<?php
+
+
+use AC\core\system\db\Query;
+use AC\core\engines\Engines;
+use PHPMailer\PHPMailer;
+
+uses('smtp');
+
+/**
+ *  если константа определена и задан в ней путь то сохраняет письма по этому пути
+ * (для unix систем должен быть доступ для записи по этому пути)
+ *  используется для записи всех писем в файлы
+ *  По умолчанию путь  - dirname(__FILE__) . '../../mails'
+ */
+defined('SAVE_EMAIL_TO_FILE') || (define('SAVE_EMAIL_TO_FILE', false));
+defined('TYPE_MAIL_TEMPLATE') || (define('TYPE_MAIL_TEMPLATE', 'html'));
+
+
+class reservation_dispatch /*extends PHPMailer*/
+{
+  public function __construct($exceptions = null)
+  {
+    parent::__construct($exceptions);
+    $this->isHTML(TYPE_MAIL_TEMPLATE == 'html');
+    $this->setFrom('no-reply@' . HOST_NAME, config('app')->getProjectTitle() ?? '');
+    $this->CharSet = 'UTF-8';
+    $this->setLanguage(config('lang')->defaultLanguage);
+  }
+
+  function getTemplate($mode, $alias, &$title, &$subject, &$content)
+  {
+    $q    = 'select title, subject, content from ' . Query::tableName('letters_templates') . ' ' .
+      'where mode = ' . $mode . ' and alias = :alias';
+    $temp = Query::sqlQuery($q, array('alias' => $alias));
+    if (!empty($temp)) {
+      //получаем строки прощадок
+      list ($title, $subject, $content) = [$temp[0]['title'], $temp[0]['subject'], $temp[0]['content']];
+
+      return true;
+    } else {
+      $title = $subject = $content = null;
+
+      return false;
+    }
+  }
+
+  public function checkTemplate($mode, $alias)
+  {
+    return count(
+      Query::sqlQuery(
+        'select * from ' . Query::tableName('letters_templates') .
+        ' where mode = ' . $mode . ' and alias = :alias', [':alias' => $alias], true, ['style' => PDO::FETCH_NUM]
+      )
+    );
+  }
+
+  function setTemplate($mode, $alias, $subject, $content)
+  {
+    $q = 'update ' . Query::tableName('letters_templates') . ' ' .
+      'set ' .
+      'subject = :subject , ' .
+      'content = :content ' .
+      'where mode = ' . $mode . ' AND alias = :alias';
+
+    return Query::sqlQuery($q, array('subject' => $subject, 'content' => $content, 'alias' => $alias), false);
+  }
+
+  function insert($mode, $alias, $title, $subject, $content)
+  {
+    $q = 'insert into ' . Query::tableName('letters_templates') .
+      ' set ' .
+      'mode = ' . $mode . ', ' .
+      'alias = :alias,  ' .
+      'title = :title, ' .
+      'subject = :subject, ' .
+      'content = :content';
+    return Query::sqlQuery($q,
+      [
+        'alias'   => $alias,
+        'title'   => $title,
+        'subject' => $subject,
+        'content' => $content,
+      ],
+      false);
+  }
+
+  function remove($mode, $alias)
+  {
+    return Query::sqlQuery('delete from ' . Query::tableName('letters_templates') . ' where mode = ' . $mode . ' and alias= "' . $alias . '"',
+      array(), false);
+  }
+
+  function getTemplates(&$templates = [], $mode = [0, 1], $asAlias = false)
+  {
+    $mode      = '"' . implode('" , "', $mode) . '"';
+    $q         = 'select mode, alias, title from ' . Query::tableName('letters_templates') . ' where mode in (' . $mode . ') order by mode, alias';
+    $templates = Query::sqlQuery($q);
+    if (!empty($templates)) {
+      if ($asAlias) {
+        $_temp     = $templates;
+        $templates = [];
+        foreach ($_temp as $item) {
+          $templates[$item['mode'] . '_' . $item['alias']] = $item;
+        }
+      }
+      return true;
+    } else {
+      $templates = [];
+
+      return false;
+    }
+  }
+
+  /** todo доработать используется на tennishalle-dortmund.de
+   *
+   * @param string $time
+   * @param string $template_alias
+   * @param string $template_mode
+   *
+   * @return string
+   */
+  function correctAliasByTime($time, $template_alias, $template_mode)
+  {
+    if (defined('LETTER_CORRECT_ALIAS_INTERVAL') &&
+      defined('LETTER_CORRECT_ALIAS_REPLACE') &&
+      LETTER_CORRECT_ALIAS_INTERVAL &&
+      LETTER_CORRECT_ALIAS_REPLACE &&
+      $template_alias == LETTER_CORRECT_ALIAS_REPLACE) {
+      $now   = strtotime($time ?: 'now');
+      $start = strtotime(date('Y-m-d') . ' ' . LETTER_CORRECT_TIME_START);
+      $stop  = strtotime(date('Y-m-d') . ' ' . LETTER_CORRECT_TIME_STOP);
+      if ($now >= $start && $now < $stop) {
+        $template_alias = !$this->checkTemplate($template_mode, LETTER_CORRECT_ALIAS_INTERVAL) ? $template_alias
+          : LETTER_CORRECT_ALIAS_INTERVAL;
+      }
+    }
+
+    return $template_alias;
+  }
+
+  //собственно рассылка писем
+  //$to может быть или одним адресом (строка) или несколькими (массив)
+  function dispatch($to, $template_mode, $template_alias, $template_data)
+  {
+    $a = Service::engines();
+    $q    = 'select subject, content from ' . Query::tableName('letters_templates') . ' ' .
+      'where mode = ' . $template_mode . ' and alias = :template_alias';
+    $temp = Query::sqlQuery($q, ['template_alias' => $template_alias]);
+    if (!empty($temp)) {
+      $row = $temp[0];
+
+      //заголовки письма
+      $this->addReplyTo($a->config['admin_email'], config('app')->getProjectTitle());
+
+      //продставляем значения в шаблон
+      $content = $row['content'];
+      foreach ($template_data as $key => $value) {
+        $content = str_replace('%' . $key . '%', ($value ?? ''), $content);
+      }
+      if(empty($content)){
+        $content = '<p></p>';
+      }
+      if ($this->ContentType == self::CONTENT_TYPE_PLAINTEXT) {
+        $this->Body = $content;
+      } else {
+        $this->msgHTML($content);
+      }
+      $this->Subject = $a->config['email_subject_prefix'] . ' ' . $row['subject' . ((empty($locale) || $locale == 'de')
+          ? '' : '_' . $locale)];
+
+
+      $this->clearAddresses();
+      if (defined('TEST_ACTIVE_COURT') && TEST_ACTIVE_COURT) {
+        $this->addAddress('developer@forumedia.com');
+      } else {
+        if (is_array($to)) {
+          foreach ($to as $to1) {
+            $this->addAddress($to1);
+          }
+        } else {
+          $this->addAddress($to);
+        }
+      }
+      $this->_mail($to);
+
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  public function _mail($to)
+  {
+    if (LOCAL_SERVER && defined('SAVE_EMAIL_TO_FILE') && SAVE_EMAIL_TO_FILE !== false) {
+      $isHtml = $this->ContentType == self::CONTENT_TYPE_TEXT_HTML;
+      if ($this->preSend()) {
+        Debug()::saveMail(
+          implode(';', (is_array($to) ? $to : array($to))),
+          $this->Subject,
+          $this->MIMEBody,
+          $this->MIMEHeader,
+          $isHtml
+        );
+      }
+      return true;
+    } else {
+      if (defined('SMTP') && SMTP && $this->Mailer !== 'smtp') {
+        $this->setSmtp();
+        // $this->SMTPDebug = 4;
+      }
+
+      if ($this->send()) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  public function setSmtp()
+  {
+    $this->isSMTP();
+    $this->Host       = SMTP_HOST;
+    $this->Port       = SMTP_PORT;
+    $this->SMTPSecure = SMTP_SECURE;
+
+    if (defined('SMTP_USER') && SMTP_USER != '') {
+      $this->SMTPAuth = SMTP_AUTH;
+      $this->Username = SMTP_USER;
+      $this->Password = SMTP_PASSWORD;
+    }
+    // $this->SMTPDebug = 4;
+    $this->SMTPDebug = (int)SMTP_DEBUG;
+  }
+}
+
+?>

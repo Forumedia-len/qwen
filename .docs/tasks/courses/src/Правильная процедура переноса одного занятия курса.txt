@@ -1,0 +1,60 @@
+Правильная процедура переноса одного занятия курса на другое время
+
+1. Отменить текущее занятие (не удалять!)
+   — Обновить соответствующую запись в at_base_active_court_reservations:
+     UPDATE at_base_active_court_reservations
+     SET status = '0', memo = TRIM(CONCAT(memo, ' — Termin verschoben'))
+     WHERE reservation_id = ?;
+   — Это сохраняет историю, финансовую привязку и не нарушает FOREIGN KEY.
+   — Связь в course_reservations остаётся (для отчётов: кто был записан, когда отменено).
+
+2. Создать новую бронь на новое время
+   — Скопировать исходную бронь (до отмены), заменив:
+     • start, finish → новое время,
+     • status = '1',
+     • client_id = trainer_client_id (если это «заготовка») или 0,
+     • ordered = NOW(),
+     • memo = CONCAT('Neuer Termin — verschoben von ', старое_время)
+   — Пример:
+     INSERT INTO at_base_active_court_reservations (
+       area_id, client_id, type_reservation, status, light_state, heating_state,
+       encash, start, finish, ordered, price, light_price, heating_price, net_price,
+       memo, door_code
+     )
+     SELECT
+       area_id, trainer_client_id, type_reservation, '1', light_state, heating_state,
+       encash, ?, ?, NOW(), price, light_price, heating_price, net_price,
+       CONCAT('Neuer Termin — verschoben von ', start), door_code
+     FROM at_base_active_court_reservations
+     WHERE reservation_id = ? AND status = '1';
+
+3. Привязать новую бронь к курсу
+   — Вставить новую запись в at_base_active_court_course_reservations:
+     INSERT INTO at_base_active_court_course_reservations (
+       course_group_id, reservation_id, is_full_course_reservation
+     )
+     VALUES (?, LAST_INSERT_ID(), '0');
+   — Флаг '0' — потому что это не первоначальное создание курса, а коррекция.
+
+4. (Опционально) Перенести участников
+   — Найти всех участников, забронировавших это занятие:
+     SELECT reservation_id
+     FROM course_reservations cr
+     JOIN reservations r ON r.reservation_id = cr.reservation_id
+     WHERE cr.course_group_id = ? AND r.start = ?original_start
+       AND r.client_id NOT IN (SELECT trainer_client_id FROM course_groups WHERE course_group_id = ?)
+       AND r.status = '1';
+   — Для каждой найденной брони участника:
+     a) Создать копию с новым временем (аналогично шагу 2),
+     b) Вставить новую связь в course_reservations (аналогично шагу 3),
+     c) Отменить старую броню участника: UPDATE reservations SET status = '0', memo += ' — verschoben'.
+
+5. Отправить уведомление
+   — Использовать шаблон kurs-info из letters_templates.
+   — Подстановки: {course_title}, {old_date}, {new_date}.
+   — Записать факт отправки в course_notifications_log.
+
+Важно:
+• Новая бронь — это новый reservation_id, а не UPDATE старой.
+• Это позволяет сохранить аудит и избежать коллизий по занятости.
+• Требование ТЗ: «удаление дат не влияет на цену уже оплаченных курсов» — выполняется, так как старая броня остаётся в истории со статусом '0'.

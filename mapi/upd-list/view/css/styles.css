@@ -1,0 +1,21 @@
+.autorize{
+min-height: 500px;
+}
+
+.autorize form{
+    width: 60%;
+}
+
+.item-upd,
+.item-del{
+cursor: pointer;
+}
+
+.edit form input{
+    border: 1px solid black !important;
+}
+
+.edit i.item-upd{
+    color: red;
+}
+

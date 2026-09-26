@@ -1,0 +1,113 @@
+<?php
+
+use AC\core\engines\Engines;
+
+$_page['key'] = 'config_letters';
+
+class config_letters
+{
+  /**
+   * @var Engines
+   */
+  public $r;
+
+  function start()
+  {
+    $this->r = new Engines();
+    switch (Service::request()->_get('action')) {
+      case 'editTemplate':
+        return $this->editTemplate();
+        break;
+      case 'changeTemplate':
+        return $this->changeTemplate();
+        break;
+      default:
+        return $this->getTemplatesList();
+    }
+  }
+
+  //список шаблоногв
+  function getTemplatesList()
+  {
+    $ar = array();
+    foreach ($this->r->areas->selectActiveType('type_id') as $type) {
+      $ar[] = 'order_new_' . $type->alias;
+    }
+    if ($this->r->dispatch->getTemplates($templates)) {
+      $out = "<h1>".lang('Email Templates', 'config_letters')."</h1>\n";
+      $out .= '<table border="0" cellspacing="1" cellpadding="3" bgcolor="#FFFFFF" align="center" class="main wide">' . "\n";
+      $out .= '<tr><th>'.lang('Recipient', 'config_letters').'</th><th>'.lang('Subject', 'config_letters').'</th><th colspan="2">'.lang('Action').'</th></tr>' . "\n";
+      foreach ($templates as $row) {
+        if (strstr($row['alias'], 'order_new') && !in_array($row['alias'], $ar) && $row['alias'] !== 'order_new_no_code') {
+          continue;
+        }
+        if (MC_ARENA && !strstr($row['alias'], 'mc_arena')) {
+          continue;
+        } elseif (!MC_ARENA && strstr($row['alias'], 'mc_arena')) {
+          continue;
+        }
+        $out .= '<tr>';
+        $out .= '<td class="dark">' . ($row['mode'] == 0 ? lang('Admin') : lang('Client')) . '</td>';
+        $out .= '<td class="light">' . $row['title'] . '</td>';
+        $out .= '<td class="dark"><a href="config_letters.php?action=editTemplate&mode=' . $row['mode'] . '&alias=' . $row['alias'] . '" class="btnEdit">'.lang('button_update').'</a></td>';
+        $out .= "</tr>\n";
+      }
+      $out      .= "</table>\n";
+      $output[] = $out;
+    }
+
+    return $output;
+  }
+
+  //форма редактирования
+  function editTemplate()
+  {
+    if (isset ($_GET['mode']) && isset ($_GET['alias']) && $this->r->dispatch->getTemplate(
+        (int)$_GET['mode'] + 1,
+        $_GET['alias'],
+        $title,
+        $subject,
+        $content
+      )) {
+      $out = "<h1>".lang('Change template', 'config_letters')."</h1>\n";
+      $out .= '<form method="post" action="config_letters.php?action=changeTemplate">' . "\n";
+      $out .= '<input type="hidden" name="mode" value="' . $_GET['mode'] . '">' . "\n";
+      $out .= '<input type="hidden" name="alias" value="' . $_GET['alias'] . '">' . "\n";
+      $out .= '<table border="0" cellspacing="1" cellpadding="3" align="center" class="main wide">' . "\n";
+      $out .= '<tr><th colspan="2">' . $title . '</th></tr>' . "\n";
+      $out .= '<tr><td class="light">'.lang('Subject', 'config_letters').'</td><td class="light"><input type="text" name="subject" class="input wide" value="' . htmlspecialchars(
+          $subject,
+          ENT_QUOTES
+        ) . '"/></td></tr>' . "\n";
+      $out .= '<tr><td class="dark">'.lang('Content').'</td><td class="dark"><textarea name="content" class="ckeditor input wide mono" style="height:30em">' . htmlspecialchars(
+          $content,
+          ENT_QUOTES
+        ) . '</textarea></td></tr>' . "\n";
+      $out .= '<tr><th colspan="2"><input type=submit class="button" value="'.lang('button_update').'">&nbsp;<input type="reset" class="button" value="'.lang('button_reset').'"></th></tr>' . "\n";
+      $out .= '</table>' . "\n";
+      $out .= '</form>' . "\n";
+
+      return array($out, "<span class=\"back\"><a href=\"config_letters.php\">".lang('Back')."</a></span>");
+    } else {
+      $this->error = lang('Template not found', 'message_error');
+
+      return $this->getTemplatesList();
+    }
+  }
+
+  //изменить примечание для типа площадок
+  function changeTemplate()
+  {
+    if (isset ($_POST['mode']) && isset ($_POST['alias']) && isset ($_POST['subject']) && isset ($_POST['content'])) {
+      $this->r->dispatch->setTemplate((int)$_POST['mode'] + 1, $_POST['alias'], $_POST['subject'], $_POST['content']);
+      $this->message = lang('message_element_base_update', 'message_success');
+    }
+
+    return $this->getTemplatesList();
+  }
+
+}
+
+$a                = new config_letters;
+$_page['content'] = $a->start();
+$_page['js'][]    = 'visualeditor/ckeditor';

@@ -1,0 +1,7 @@
+RewriteEngine On
+RewriteCond $1 !^(act\.php)
+#RewriteCond %{REQUEST_FILENAME} !-f
+#RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule (.*) index.php [L,NC,QSA]
+
+Header always set Strict-Transport-Security "max-age=31536000;"

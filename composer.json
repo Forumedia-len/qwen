@@ -1,0 +1,29 @@
+{
+  "name": "active-court/application",
+  "description": "Active Court application development tools",
+  "type": "project",
+  "license": "proprietary",
+  "repositories": [
+    {
+      "type": "vcs",
+      "url": "https://git.forumedia.eu/ActiveCourt/ac_tests.git",
+      "canonical": true
+    }
+  ],
+  "require": {
+    "php": "~8.2.0"
+  },
+  "require-dev": {
+    "active-court/base-ac-dev": "dev-master"
+  },
+  "scripts": {
+    "test": "@php bin/actest",
+    "docs:check": "@php bin/check-documentation"
+  },
+  "config": {
+    "allow-plugins": {
+      "codeception/codeception": true
+    },
+    "sort-packages": true
+  }
+}

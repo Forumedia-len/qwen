@@ -1,0 +1,9 @@
+<?php
+//ПРЕФИКСЫ СЧЕТОВ
+defined('ACCOUNT_NUMBER') || define('ACCOUNT_NUMBER', 'RE12');
+defined('ABO_ACCOUNT_NUMBER') || define('ABO_ACCOUNT_NUMBER', 'RA14');
+defined('OTHER_ACCOUNT_NUMBER') || define('OTHER_ACCOUNT_NUMBER', 'RS16');
+defined('PREPAYMENT_ACCOUNT_NUMBER') || define('PREPAYMENT_ACCOUNT_NUMBER', 'GH');
+defined('STORNO_ACCOUNT_NUMBER') || define('STORNO_ACCOUNT_NUMBER', 'GU18');
+defined('ONLINE_PAYMENT_ACCOUNT_NUMBER') || define('ONLINE_PAYMENT_ACCOUNT_NUMBER', 'RP18');
+

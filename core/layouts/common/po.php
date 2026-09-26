@@ -1,0 +1,1 @@
+<img src = "<?= cdn_url(paths()->getAssetsDir('images/payone_small.png', 'common')) ?>" style ="float: left;margin-right: 10px;display: block;position: relative;top: 2px;" alt="payone image"/>
