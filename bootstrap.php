@@ -2,6 +2,7 @@
 
 use AC\app\locators\Helper;
 use AC\app\locators\Service;
+use AC\core\system\pattern\Events;
 
 defined('SHARED_PATH') || define('SHARED_PATH', dirname(__FILE__) . DIRECTORY_SEPARATOR);
 defined('ROOT_PATH') || define('ROOT_PATH', dirname(__FILE__) . DIRECTORY_SEPARATOR);
@@ -38,6 +39,9 @@ if (!class_alias(loadClass('Helper', $paths->locatorsDir, false), 'Helper')) {
 }
 
 uses('defined', 'baseConstants', 'authorization', 'holidays');
+
+// Регистрация слушателей системных событий (AC\core\system\pattern\Events)
+Events::initialize();
 
 if(defined('USE_HEADERS') && USE_HEADERS){
 // Быстрая инициализация
