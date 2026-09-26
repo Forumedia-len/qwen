@@ -48,6 +48,7 @@ Active Court — PHP-система управления спортивными 
 - [Стратегия миграций БД](development/database-migration-strategy.md)
 - [Реестр сайтов и secrets](development/site-registry-and-secrets.md)
 - [Система конфигурации](core/configuration-system.md)
+- [Система событий (Events)](core/event-system.md)
 - [Система базы данных](core/database-system.md)
 - [Service Locator и архитектура](architecture/architecture.md)
 
